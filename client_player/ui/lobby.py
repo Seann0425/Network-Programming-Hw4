@@ -112,9 +112,9 @@ class LobbyWindow(QMainWindow):
 
     # Game Table
     self.store_table = QTableWidget()
-    self.store_table.setColumnCount(5)
+    self.store_table.setColumnCount(6)
     self.store_table.setHorizontalHeaderLabels(
-      ["Game Name", "Latest Ver", "Type", "Local Ver", "Action"]
+      ["Game Name", "Rating", "Latest Ver", "Type", "Local Ver", "Action"]
     )
     self.store_table.horizontalHeader().setSectionResizeMode(
       QHeaderView.ResizeMode.Stretch
@@ -142,13 +142,18 @@ class LobbyWindow(QMainWindow):
       server_ver = game["version"]
       exe_name = game.get("exe_path", "game.py")
 
+      rating = game.get("rating", 0.0)
+      count = game.get("rating_count", 0)
+      rating_str = f"{rating} ({count})" if count > 0 else "N/A"
+
       self.store_table.setItem(i, 0, QTableWidgetItem(str(name)))
-      self.store_table.setItem(i, 1, QTableWidgetItem(str(server_ver)))
-      self.store_table.setItem(i, 2, QTableWidgetItem(str(game.get("type", "Unknown"))))
+      self.store_table.setItem(i, 1, QTableWidgetItem(rating_str))
+      self.store_table.setItem(i, 2, QTableWidgetItem(str(server_ver)))
+      self.store_table.setItem(i, 3, QTableWidgetItem(str(game.get("type", "Unknown"))))
 
       local_ver = self.check_local_version(name)
       self.store_table.setItem(
-        i, 3, QTableWidgetItem(local_ver if local_ver else "Not Installed")
+        i, 4, QTableWidgetItem(local_ver if local_ver else "Not Installed")
       )
 
       btn_action = QPushButton()
@@ -167,7 +172,7 @@ class LobbyWindow(QMainWindow):
           lambda checked, n=name, e=exe_name: self.create_room_and_play(n, e)
         )
 
-      self.store_table.setCellWidget(i, 4, btn_action)
+      self.store_table.setCellWidget(i, 5, btn_action)
 
   # ==========================
   # Tab 2: Rooms Logic (Lobby)

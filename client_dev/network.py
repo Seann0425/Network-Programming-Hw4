@@ -148,3 +148,10 @@ class NetworkClient:
       return True, "Success"
     else:
       return False, res.get("msg")
+
+  def delete_game(self, game_name):
+    send_request(self.sock, Command.DELETE_GAME, {"name": game_name})
+    cmd, res = recv_request(self.sock)
+    if res.get("status") == Status.SUCCESS.value:
+      return True, res.get("msg")
+    return False, res.get("msg")

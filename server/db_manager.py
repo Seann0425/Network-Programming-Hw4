@@ -25,42 +25,42 @@ class DBManager:
   def _init_tables(self):
     """初始化資料表"""
     create_developers_table = """
-        CREATE TABLE IF NOT EXISTS developers (
-            username TEXT PRIMARY KEY,
-            password_hash TEXT NOT NULL
-        );
+            CREATE TABLE IF NOT EXISTS developers (
+                username TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL
+            );
         """
 
     create_players_table = """
-        CREATE TABLE IF NOT EXISTS players (
-            username TEXT PRIMARY KEY,
-            password_hash TEXT NOT NULL
-        );
+            CREATE TABLE IF NOT EXISTS players (
+                username TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL
+            );
         """
 
-    # 遊戲表：包含名稱、版本、作者、路徑、描述、類型
+    # 遊戲表
     create_games_table = """
-        CREATE TABLE IF NOT EXISTS games (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            version TEXT NOT NULL,
-            author TEXT NOT NULL,
-            description TEXT,
-            game_type TEXT,
-            exe_path TEXT,
-            UNIQUE(name)
-        );
+            CREATE TABLE IF NOT EXISTS games (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                author TEXT NOT NULL,
+                description TEXT,
+                game_type TEXT,
+                exe_path TEXT,
+                UNIQUE(name)
+            );
         """
 
     create_reviews_table = """
-        CREATE TABLE IF NOT EXISTS reviews (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_name TEXT NOT NULL,
-            player_name TEXT NOT NULL,
-            rating INTEGER CHECK(rating >= 1 AND rating <= 5),
-            comment TEXT,
-            UNIQUE(game_name, player_name)
-        );
+            CREATE TABLE IF NOT EXISTS reviews (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_name TEXT NOT NULL,
+                player_name TEXT NOT NULL,
+                rating INTEGER CHECK(rating >= 1 AND rating <= 5),
+                comment TEXT,
+                UNIQUE(game_name, player_name)
+            );
         """
 
     with self.lock:
@@ -116,7 +116,7 @@ class DBManager:
         return True
       return False
 
-  # --- Game Management (Developer Use Cases) ---
+  # --- Game Management ---
 
   def add_game(self, name, version, author, description, game_type, exe_path):
     """D1: 上架新遊戲"""
@@ -128,7 +128,7 @@ class DBManager:
           """
                     INSERT INTO games (name, version, author, description, game_type, exe_path)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """,
+                    """,
           (name, version, author, description, game_type, exe_path),
         )
         conn.commit()
@@ -162,15 +162,46 @@ class DBManager:
                 UPDATE games 
                 SET version = ?, exe_path = ?
                 WHERE name = ?
-            """,
+                """,
         (new_version, new_exe_path, name),
       )
       conn.commit()
       conn.close()
       return True, "Game updated successfully"
 
+  def delete_game(self, name, author):
+    """D3: 下架遊戲 (需檢查權限)"""
+    with self.lock:
+      conn = self._get_conn()
+      cursor = conn.cursor()
+
+      # 1. 權限檢查
+      cursor.execute("SELECT author, version FROM games WHERE name = ?", (name,))
+      row = cursor.fetchone()
+      if not row:
+        conn.close()
+        return False, "Game not found", None
+
+      if row[0] != author:
+        conn.close()
+        return False, "Permission denied", None
+
+      version = row[1]  # 記住版本號以便後續刪除檔案
+
+      # 2. 刪除資料庫紀錄
+      try:
+        cursor.execute("DELETE FROM games WHERE name = ?", (name,))
+        # 選擇性：連同該遊戲的評論一起刪除，保持資料乾淨
+        cursor.execute("DELETE FROM reviews WHERE game_name = ?", (name,))
+        conn.commit()
+        return True, "Game deleted", version
+      except Exception as e:
+        return False, str(e), None
+      finally:
+        conn.close()
+
   def list_all_games(self):
-    """P1: 列出所有遊戲"""
+    """P1 & P4: 列出所有遊戲 (含評分資訊)"""
     with self.lock:
       conn = self._get_conn()
       cursor = conn.cursor()
@@ -178,10 +209,22 @@ class DBManager:
         "SELECT id, name, version, author, description, game_type, exe_path FROM games"
       )
       rows = cursor.fetchall()
-      conn.close()
 
       games = []
       for r in rows:
+        game_name = r[1]
+
+        # [P4 Fix] 額外查詢評分資訊
+        # 計算該遊戲的平均分與評論總數
+        cursor.execute(
+          "SELECT AVG(rating), COUNT(*) FROM reviews WHERE game_name = ?", (game_name,)
+        )
+        rating_row = cursor.fetchone()
+
+        # 處理 None (還沒人評分) 的情況
+        avg_rating = round(rating_row[0], 1) if rating_row and rating_row[0] else 0.0
+        review_count = rating_row[1] if rating_row else 0
+
         games.append(
           {
             "id": r[0],
@@ -191,8 +234,12 @@ class DBManager:
             "description": r[4],
             "type": r[5],
             "exe_path": r[6],
+            "rating": avg_rating,  # 新增欄位
+            "rating_count": review_count,  # 新增欄位
           }
         )
+
+      conn.close()
       return games
 
   def list_my_games(self, author_name):
@@ -217,14 +264,14 @@ class DBManager:
       conn = self._get_conn()
       cursor = conn.cursor()
       try:
-        # 使用 REPLACE INTO (若重複則覆蓋) 或 INSERT
+        # 使用 UPSERT (若重複則更新)
         cursor.execute(
           """
                     INSERT INTO reviews (game_name, player_name, rating, comment)
                     VALUES (?, ?, ?, ?)
                     ON CONFLICT(game_name, player_name) 
                     DO UPDATE SET rating=excluded.rating, comment=excluded.comment
-                """,
+                    """,
           (game_name, player_name, rating, comment),
         )
         conn.commit()
@@ -233,20 +280,3 @@ class DBManager:
         return False, str(e)
       finally:
         conn.close()
-
-  def get_game_rating(self, game_name):
-    """取得某遊戲的平均分數與評論數 (用於 P1 顯示)"""
-    with self.lock:
-      conn = self._get_conn()
-      cursor = conn.cursor()
-      cursor.execute(
-        """
-              SELECT AVG(rating), COUNT(*) FROM reviews WHERE game_name = ?
-          """,
-        (game_name,),
-      )
-      row = cursor.fetchone()
-      conn.close()
-      if row and row[0]:
-        return round(row[0], 1), row[1]  # Avg, Count
-      return 0.0, 0

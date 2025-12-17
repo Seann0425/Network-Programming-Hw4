@@ -69,6 +69,8 @@ class ClientHandler(threading.Thread):
       self._handle_rate_game(data)
     elif cmd == Command.LIST_ROOMS:
       self._handle_list_rooms(data)
+    elif cmd == Command.DELETE_GAME:
+      self._handle_delete_game(data)
     else:
       # 未知的指令
       print(f"[Server] Unhandled command: {cmd}")
@@ -456,3 +458,60 @@ class ClientHandler(threading.Thread):
           )
 
     send_request(self.client_sock, Command.LIST_ROOMS, {"rooms": active_rooms})
+
+  def _handle_delete_game(self, data: dict):
+    """D3: 處理下架請求 (強力刪除版)"""
+    print(f"[Server Debug] Handling delete game request: {data}")
+
+    if not self.user:
+      send_request(self.client_sock, Command.ERROR, {"msg": "Login required"})
+      return
+
+    game_name = data.get("name")
+    if not game_name:
+      send_request(self.client_sock, Command.ERROR, {"msg": "Game name required"})
+      return
+
+    # 1. 操作 DB 刪除 (取得 version 只是參考用)
+    success, msg, _ = self.db_manager.delete_game(game_name, self.user)
+
+    if not success:
+      send_request(self.client_sock, Command.ERROR, {"msg": msg})
+      return
+
+    print(f"[Server] Deleting all files related to '{game_name}'...")
+
+    # 2. 刪除安裝目錄 (server/installed_games/GameName)
+    if self.room_manager:
+      install_dir = self.room_manager.get_game_dir(game_name)
+      if os.path.exists(install_dir):
+        try:
+          shutil.rmtree(install_dir)
+          print(f"[Server] Removed install dir: {install_dir}")
+        except Exception as e:
+          print(f"[Server Error] Failed to remove dir: {e}")
+
+    # 3. [Fix] 暴力搜尋並刪除 Storage 中的 Zip 檔
+    # 不管版本號是什麼，只要是這個遊戲的 zip 都刪除
+    if os.path.exists(STORAGE_DIR):
+      try:
+        # 檔名規則通常是 Name_Version.zip，且空格會被換成底線
+        safe_name = game_name.replace(" ", "_")
+
+        for filename in os.listdir(STORAGE_DIR):
+          # 檢查檔名是否以 "GameName_" 開頭且是 .zip
+          if filename.startswith(f"{safe_name}_") and filename.endswith(".zip"):
+            file_path = os.path.join(STORAGE_DIR, filename)
+            os.remove(file_path)
+            print(f"[Server] Removed storage file: {file_path}")
+      except Exception as e:
+        print(f"[Server Error] Failed to clean storage: {e}")
+
+    send_request(
+      self.client_sock,
+      Command.DELETE_GAME,
+      {
+        "status": Status.SUCCESS.value,
+        "msg": f"Game '{game_name}' deleted successfully",
+      },
+    )
