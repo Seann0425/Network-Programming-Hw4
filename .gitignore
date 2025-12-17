@@ -10,3 +10,12 @@ wheels/
 .venv
 
 *.db
+
+server/storage/*
+!server/storage/.gitkeep
+
+server/installed_games/*
+!server/installed_games/.gitkeep
+
+client_player/downloads/*
+!client_player/downloads/.gitkeep
