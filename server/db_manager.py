@@ -175,7 +175,7 @@ class DBManager:
       conn = self._get_conn()
       cursor = conn.cursor()
       cursor.execute(
-        "SELECT id, name, version, author, description, game_type FROM games"
+        "SELECT id, name, version, author, description, game_type, exe_path FROM games"
       )
       rows = cursor.fetchall()
       conn.close()
@@ -190,6 +190,7 @@ class DBManager:
             "author": r[3],
             "description": r[4],
             "type": r[5],
+            "exe_path": r[6],
           }
         )
       return games

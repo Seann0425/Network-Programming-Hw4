@@ -3,6 +3,8 @@
 import threading
 import socket
 import os
+import zipfile
+import shutil
 from common.constants import Command, Status
 from common.protocol import recv_request, send_request, recv_file, send_file
 
@@ -47,9 +49,6 @@ class ClientHandler(threading.Thread):
     """根據 OpCode 分發請求"""
     print(f"[Server] Received Command: {cmd} from {self.client_addr}")
 
-    # TODO: 之後會在這裡引入 controller 或 service 來處理實際業務邏輯
-    # 目前先用簡單的 if-else 框架
-
     if cmd == Command.LOGIN:
       self._handle_login(data)
     elif cmd == Command.LOGOUT:
@@ -68,6 +67,8 @@ class ClientHandler(threading.Thread):
       self._handle_create_room(data)
     elif cmd == Command.RATE_GAME:
       self._handle_rate_game(data)
+    elif cmd == Command.LIST_ROOMS:
+      self._handle_list_rooms(data)
     else:
       # 未知的指令
       print(f"[Server] Unhandled command: {cmd}")
@@ -168,6 +169,22 @@ class ClientHandler(threading.Thread):
       recv_file(self.client_sock, file_size, save_path)
       print(f"[Server] File received: {save_path}")
 
+      # 我們使用 RoomManager 管理的路徑
+      install_dir = self.room_manager.get_game_dir(game_name)
+      if not os.path.exists(install_dir):
+        os.makedirs(install_dir)
+
+      try:
+        print(f"[Server] Installing (Unzipping) {game_name}...")
+        with zipfile.ZipFile(save_path, "r") as zip_ref:
+          zip_ref.extractall(install_dir)
+      except Exception as e:
+        print(f"[Server] Unzip failed: {e}")
+        send_request(
+          self.client_sock, Command.ERROR, {"msg": f"Server unzip failed: {e}"}
+        )
+        return
+
       # 5. 更新資料庫
       # 這裡假設 exe_path 是開發者填寫的「解壓縮後的啟動檔路徑」，需存入 DB
       exe_path = data.get("exe_path", "")
@@ -212,9 +229,7 @@ class ClientHandler(threading.Thread):
     new_version = data.get("version")
     file_size = data.get("file_size")
 
-    # 1. 權限與存在檢查 (透過 DB Manager 的 update_game_version 預檢，或者直接由 DB update 時擋)
-    # 為了流程順暢，我們先確認 Server 準備好接收檔案
-
+    # 1. 權限與存在檢查
     # 檔名更新為新版本
     safe_filename = f"{game_name}_{new_version}.zip".replace(" ", "_")
     save_path = os.path.join(STORAGE_DIR, safe_filename)
@@ -229,6 +244,39 @@ class ClientHandler(threading.Thread):
     try:
       print(f"[Server] Receiving update for {game_name}...")
       recv_file(self.client_sock, file_size, save_path)
+
+      # ==========================================
+      # [Fix] 自動部署：解壓縮覆蓋 installed_games
+      # ==========================================
+      print(f"[Server] Deploying update for {game_name}...")
+
+      # 取得安裝路徑 (例如 server/installed_games/TicTacToe)
+      install_dir = self.room_manager.get_game_dir(game_name)
+
+      # 如果資料夾已存在，先刪除舊版以確保乾淨更新
+      if os.path.exists(install_dir):
+        try:
+          shutil.rmtree(install_dir)
+          print(f"[Server] Removed old version at {install_dir}")
+        except Exception as e:
+          print(f"[Server Warning] Failed to clean install dir: {e}")
+
+      # 建立新資料夾
+      if not os.path.exists(install_dir):
+        os.makedirs(install_dir)
+
+      # 解壓縮新版檔案
+      try:
+        with zipfile.ZipFile(save_path, "r") as zip_ref:
+          zip_ref.extractall(install_dir)
+        print(f"[Server] Deployment complete. {game_name} updated to {new_version}.")
+      except Exception as e:
+        print(f"[Server Error] Unzip failed: {e}")
+        send_request(
+          self.client_sock, Command.ERROR, {"msg": f"Server unzip failed: {e}"}
+        )
+        return
+      # ==========================================
 
       # 3. 更新 DB
       # 注意: update_game_version 會檢查 author 是否正確
@@ -311,7 +359,7 @@ class ClientHandler(threading.Thread):
       print(f"[Server] Download error: {e}")
 
   def _handle_create_room(self, data: dict):
-    """P3: 處理建立房間請求"""
+    """P3 Update: 建立房間並回傳 Game Server Port"""
     if not self.user:
       send_request(self.client_sock, Command.ERROR, {"msg": "Please login first"})
       return
@@ -321,18 +369,30 @@ class ClientHandler(threading.Thread):
       send_request(self.client_sock, Command.ERROR, {"msg": "Game name required"})
       return
 
-    # 使用 RoomManager 建立房間
-    if self.room_manager:
-      room_id = self.room_manager.create_room(self.user, game_name)
+    try:
+      # 呼叫新的 create_room，取得 room_id 和 port
+      room_id, port = self.room_manager.create_room(self.user, game_name)
 
-      # 回傳成功與 Room ID
+      # 回傳詳細資訊給 Client
       send_request(
         self.client_sock,
         Command.CREATE_ROOM,
-        {"status": Status.SUCCESS.value, "room_id": room_id, "msg": "Room created"},
+        {
+          "status": Status.SUCCESS.value,
+          "room_id": room_id,
+          "port": port,  # <--- 新增 Port
+          "msg": "Room created",
+        },
       )
-    else:
-      send_request(self.client_sock, Command.ERROR, {"msg": "Server room error"})
+    except FileNotFoundError:
+      send_request(
+        self.client_sock,
+        Command.ERROR,
+        {"msg": "Server script (server.py) not found in game package"},
+      )
+    except Exception as e:
+      print(f"[Server] Create room error: {e}")
+      send_request(self.client_sock, Command.ERROR, {"msg": str(e)})
 
   def close_connection(self):
     """清理資源"""
@@ -369,3 +429,30 @@ class ClientHandler(threading.Thread):
       )
     else:
       send_request(self.client_sock, Command.ERROR, {"msg": msg})
+
+  def _handle_list_rooms(self, data: dict):
+    """回傳目前所有活躍的房間列表"""
+    # 這裡我們需要去 room_manager 拿資料
+    # room_manager.rooms 結構: {room_id: {'game':..., 'port':..., 'players':...}}
+
+    # 為了避免直接傳送 process 物件導致錯誤，我們只挑選需要的資訊
+    active_rooms = []
+
+    # 注意：需確保 thread safety，建議在 room_manager 加一個 get_all_rooms() 方法
+    # 但為了快速實作，我們先直接讀取 (假設 Python dict read 是 atomic 或影響不大)
+    # 更好的做法是在 room_manager.py 加一個方法
+
+    if self.room_manager:
+      with self.room_manager.lock:  # 鎖住以確保資料一致
+        for r_id, info in self.room_manager.rooms.items():
+          active_rooms.append(
+            {
+              "room_id": r_id,
+              "game_name": info["game"],
+              "host": info["host"],
+              "current_players": len(info["players"]),
+              "port": info["port"],  # 重要：加入房間需要這個 Port
+            }
+          )
+
+    send_request(self.client_sock, Command.LIST_ROOMS, {"rooms": active_rooms})

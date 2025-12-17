@@ -19,6 +19,7 @@ class Command(Enum):
   CREATE_ROOM = auto()  # P3: 建立房間
   JOIN_ROOM = auto()  # P3: 加入房間 (延伸)
   RATE_GAME = auto()  # P4: 評分
+  LIST_ROOMS = auto()
 
   # --- System ---
   ERROR = auto()  # 錯誤訊息

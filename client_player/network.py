@@ -88,7 +88,7 @@ class NetworkClient:
 
     cmd, res = recv_request(self.sock)
     if res.get("status") == Status.SUCCESS.value:
-      return True, res.get("room_id")
+      return True, {"room_id": res.get("room_id"), "port": res.get("port")}
     else:
       return False, res.get("msg")
 
@@ -100,3 +100,14 @@ class NetworkClient:
     if res.get("status") == Status.SUCCESS.value:
       return True, res.get("msg")
     return False, res.get("msg")
+
+  def get_active_rooms(self):
+    """傳送 LIST_ROOMS 請求取得房間列表"""
+    send_request(self.sock, Command.LIST_ROOMS, {})
+    cmd, data = recv_request(self.sock)
+
+    if cmd == Command.LIST_ROOMS:
+      return data.get("rooms", [])
+    else:
+      print(f"[Network] Failed to get rooms: {data}")
+      return []
