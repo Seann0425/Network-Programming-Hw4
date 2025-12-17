@@ -37,4 +37,4 @@ class Status(Enum):
 
 # 定義預設的 Host 和 Port，方便測試
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8888
+DEFAULT_PORT = 30000
