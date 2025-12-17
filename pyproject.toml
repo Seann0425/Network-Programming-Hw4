@@ -8,3 +8,6 @@ dependencies = [
     "pyqt6>=6.10.1",
     "ruff>=0.14.9",
 ]
+
+[tool.ruff]
+indent-width = 2
