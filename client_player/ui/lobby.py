@@ -334,18 +334,23 @@ class LobbyWindow(QMainWindow):
 
   def _launch_process(self, exe_path, room_id, port, cwd):
     try:
-      # [Fix] 將 exe_path 轉為絕對路徑，避免與 cwd 疊加導致路徑錯誤
+      # [Fix] 取得目前連線的 Server IP
+      # 從 self.network.sock 取得對方的 IP (peer name)
+      # 如果沒有連線 (理論上不可能)，回退到 127.0.0.1
+      try:
+        current_server_ip = self.network.sock.getpeername()[0]
+      except:
+        current_server_ip = "127.0.0.1"
+
       abs_exe_path = os.path.abspath(exe_path)
 
+      # [Fix] 將 IP 作為第三個參數傳入
       if exe_path.endswith(".py"):
-        # 使用絕對路徑啟動
-        cmd = [sys.executable, abs_exe_path, str(room_id), str(port)]
+        cmd = [sys.executable, abs_exe_path, str(room_id), str(port), current_server_ip]
       else:
-        cmd = [abs_exe_path, str(room_id), str(port)]
+        cmd = [abs_exe_path, str(room_id), str(port), current_server_ip]
 
-      print(f"[Lobby] Launching: {cmd} (CWD: {cwd})")
-
-      # 這裡也可以考慮加入 stdout/stderr 捕捉，方便之後除錯
+      print(f"[Lobby] Launching: {cmd} (Target Server: {current_server_ip})")
       subprocess.Popen(cmd, cwd=cwd)
 
     except Exception as e:

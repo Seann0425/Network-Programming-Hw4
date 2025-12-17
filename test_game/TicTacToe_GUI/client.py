@@ -96,11 +96,12 @@ class NetworkThread(QThread):
 
 # === GUI 主視窗 ===
 class TicTacToeWindow(QMainWindow):
-  def __init__(self, room_id, port):
+  def __init__(self, room_id, port, server_ip="127.0.0.1"):
     super().__init__()
     self.setWindowTitle(f"Tic-Tac-Toe GUI (Room {room_id})")
     self.resize(400, 550)
 
+    self.server_ip = server_ip
     self.room_id = room_id
     self.port = port
     self.my_turn = False
@@ -159,7 +160,7 @@ class TicTacToeWindow(QMainWindow):
 
   def start_game(self):
     # 啟動網路執行緒
-    self.network = NetworkThread("127.0.0.1", self.port)
+    self.network = NetworkThread(self.server_ip, self.port)
     self.network.msg_received.connect(self.log_msg)
     self.network.board_updated.connect(self.update_board)
     self.network.input_requested.connect(self.enable_input)
@@ -245,12 +246,12 @@ class TicTacToeWindow(QMainWindow):
 if __name__ == "__main__":
   app = QApplication(sys.argv)
 
-  # 接收參數: client.py <room_id> <port>
+  # 接收參數: client.py <room_id> <port> [server_ip]
   if len(sys.argv) < 3:
-    # 本地測試用預設值
-    print("Usage: python client.py <room_id> <port>")
+    print("Usage: python client.py <room_id> <port> [server_ip]")
     room_id = "TEST"
     port = 12345
+    server_ip = "127.0.0.1"
   else:
     room_id = sys.argv[1]
     try:
@@ -259,6 +260,22 @@ if __name__ == "__main__":
       print("Port must be an integer")
       sys.exit(1)
 
-  window = TicTacToeWindow(room_id, port)
+    # [Fix] 接收第三個參數作為 Server IP
+    if len(sys.argv) > 3:
+      server_ip = sys.argv[3]
+    else:
+      server_ip = "127.0.0.1"
+
+  # 傳入 server_ip 給 NetworkThread
+  # 注意：你需要確認 NetworkThread 接收 server_ip 的位置
+  # 在原本的 code 中，NetworkThread 寫死 '127.0.0.1'，現在要改掉：
+
+  # 搜尋 class TicTacToeWindow 的 start_game 方法:
+  # self.network = NetworkThread('127.0.0.1', self.port)  <-- 原本的
+  # 改成：
+  # self.network = NetworkThread(self.server_ip, self.port)
+
+  # 所以我們要在 TicTacToeWindow 的 __init__ 接收 server_ip
+  window = TicTacToeWindow(room_id, port, server_ip)  # 傳入 server_ip
   window.show()
   sys.exit(app.exec())

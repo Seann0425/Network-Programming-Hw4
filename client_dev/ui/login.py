@@ -15,19 +15,20 @@ class LoginWindow(QWidget):
   # 定義訊號: 當登入成功時發出，並傳遞 username
   login_success = pyqtSignal(str)
 
-  def __init__(self, network_client):
+  def __init__(self, network_client, title_text="Game Store Login"):
     super().__init__()
     self.network = network_client
+    self.title_text = title_text
     self.init_ui()
 
   def init_ui(self):
-    self.setWindowTitle("Game Store - Developer Login")
+    self.setWindowTitle(self.title_text)
     self.setGeometry(100, 100, 300, 200)
 
     layout = QVBoxLayout()
 
     # Title
-    title = QLabel("Developer Console")
+    title = QLabel(self.title_text)
     title.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 10px;")
     layout.addWidget(title)
 
