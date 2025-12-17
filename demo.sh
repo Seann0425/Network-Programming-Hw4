@@ -21,4 +21,4 @@ fi
 
 # 4. 執行啟動腳本 (這裡改成你實際的啟動腳本名稱，例如 launcher.py 或 start_client.py)
 echo "[Script] Starting Launcher..."
-python start_client.py
+python demo.py
